@@ -37,7 +37,7 @@ runs:
       id:   var
       run: |
         token=${{ inputs.token || github.token }}
-        repo=${{ inputs.repository || format("{0}@master", github.repository) }}
+        repo=${{ inputs.repository || format('{0}@master', github.repository) }}
 
         cat <<EOF
         ::add-mask::$token
