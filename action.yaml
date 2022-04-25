@@ -1,0 +1,102 @@
+name: reflow-context
+description: |
+  Action for exporting reflow context as output and environment variables
+
+inputs:
+  token:
+    description: GitHub token to use (github.token by default)
+    required:    false
+    type:        string
+  repository:
+    description: Repo name and ref to checkout, e.g. owner/repo@master
+    required:    true
+    type:        string
+    default:     ''
+  exclude:
+    description: List of keys to exclude from the context
+    required:    true
+    type:        string
+    default: |
+      - github
+      - exclude
+  debug:
+    description: Whether to debug shell commands
+    required:    true
+    type:        string
+    default:     'false'
+
+outputs:
+  context:
+    description: Context object encoded as JSON
+    value:       ${{ steps.template.outputs.context }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up variables
+      id:   var
+      run: |
+        cat <<EOF
+        ::add-mask::${{ inputs.token || github.token }}
+        ::set-output name=token::${{ inputs.token || github.token }}
+        ::set-output name=repository::$(echo ${{ inputs.repository }} | cut -d@ -f1)
+        ::set-output name=ref::$(echo ${{ inputs.repository }} | cut -d@ -f2)
+        EOF
+
+        if [[ "${{ inputs.debug }}" == "true" ]]; then
+          echo "::set-output name=shell::bash --noprofile --norc -e -o pipefail -x {0}"
+        else
+          echo "::set-output name=shell::bash --noprofile --norc -e -o pipefail {0}"
+        fi
+      shell: bash
+    - uses: actions/checkout@v3
+      if:   ${{ inputs.repository != '' }}
+      with:
+        repository: ${{ steps.var.outputs.repository }}
+        ref:        ${{ steps.var.outputs.ref }}
+        token:      ${{ steps.var.outputs.token }}
+    - name: Install reflow
+      env:
+        REFLOW_URL: https://github.com/rjeczalik/reflow/releases/download/v1.7.0/reflow-linux-amd64
+      run: |
+        do_curl() {
+          curl --disable --fail --fail-early --location --connect-timeout 10 --show-error --silent $1
+        }
+
+        mkdir -p .github/reflow/bin .github/reflow/context
+        do_curl "$REFLOW_URL" > .github/reflow/bin/reflow
+        chmod +x .github/reflow/bin/reflow
+        echo "PATH=$(pwd)/.github/reflow/bin:$PATH" >> $GITHUB_ENV
+      shell: ${{ steps.var.outputs.shell }}
+    - name: Export context object
+      id:   template
+      env:
+        GITHUB_TOKEN: ${{ steps.var.outputs.token }}
+        REFLOW_HOME:  .github/reflow
+        REFLOW_DEBUG: 1
+      run: |
+        cat >.github/reflow/context/github.json <<EOF
+        ${{ toJson(github) }}
+        EOF
+
+        cat >.github/reflow/context/exclude.yaml <<EOF
+        ${{ inputs.exclude }}
+        EOF
+
+        echo '{{- $v := (. | mustToJson)  }}{{ dict "context" $v | mustToOutput }}' | reflow template --exclude
+
+        echo '{{ . | mustToEnv }}' | reflow template --exclude >> $GITHUB_ENV
+      shell: ${{ steps.var.outputs.shell }}
+    - uses: actions/upload-artifact@v3
+      if:   ${{ always() && inputs.debug == 'true' }}
+      with:
+        name: reflow-debug
+        path: |
+          .github/reflow/context/github.json
+          .github/reflow/context/exclude.yaml
+    - name: Cleanup
+      if: ${{ always() }}
+      run: |
+        rm -fv .github/reflow/context/github.json \
+               .github/reflow/context/exclude.yaml
+      shell: ${{ steps.var.outputs.shell }}
