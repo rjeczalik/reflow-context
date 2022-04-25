@@ -36,11 +36,14 @@ runs:
     - name: Set up variables
       id:   var
       run: |
+        token=${{ inputs.token || github.token }}
+        repo=${{ inputs.repository || format("{0}@master", github.repository) }}
+
         cat <<EOF
-        ::add-mask::${{ inputs.token || github.token }}
-        ::set-output name=token::${{ inputs.token || github.token }}
-        ::set-output name=repository::$(echo ${{ inputs.repository }} | cut -d@ -f1)
-        ::set-output name=ref::$(echo ${{ inputs.repository }} | cut -d@ -f2)
+        ::add-mask::$token
+        ::set-output name=token::$token
+        ::set-output name=repository::$(echo $repo | cut -d@ -f1)
+        ::set-output name=ref::$(echo $repo | cut -d@ -f2)
         EOF
 
         if [[ "${{ inputs.debug }}" == "true" ]]; then
